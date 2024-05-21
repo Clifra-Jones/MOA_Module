@@ -72,7 +72,8 @@ Copyright = '(c) Cliff Williams. All rights reserved.'
 FunctionsToExport = @(
     'ConvertFrom-Html',
     'Get-IpRange',
-    'ConvertFrom-INI'
+    'ConvertFrom-INI',
+    'Add-Ace'
 )
 
 # Cmdlets to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no cmdlets to export.

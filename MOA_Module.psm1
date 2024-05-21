@@ -1,5 +1,5 @@
 using namespace System.Collections.Generic
-
+using namespace System.Security.AccessControl
 function ConvertFrom-Html {
     param([System.String] $html)
    
@@ -220,3 +220,53 @@ function ConvertFrom-INI() {
     }
 
     return $Settings.ToArray()
+}
+
+function Add-Ace() {
+    [CmdletBinding(DefaultParameterSetName = 'default')]
+    Param(
+        [Parameter(Mandatory)]
+        [string]$Path,
+        [Parameter(Mandatory)]
+        [string]$Identity,
+        [Parameter(Mandatory)]       
+        [String[]]$FileSystemRights,        
+        [string[]]$InheritanceFlags = 'None',
+        [string[]]$PropagationFlags = @('None'),
+        [ValidateSet('Allow','Deny')]
+        [string]$AccessControlType = 'Allow',
+        [switch]$Recurse
+    )
+
+    If (Test-Path $Path) {
+        try {
+            $Acl = Get-Acl -Path $Path
+        } catch {
+            throw $_
+        }
+
+        If ($InheritanceFlags) {
+            $FileSystemAccessRule = [FileSystemAccessRule]::New($Identity,$FileSystemRight,$InheritanceFlags,$PropagationFlags,$AccessControlType)
+        } else {
+            $FileSystemAccessRule = [FileSystemAccessRule]::New($Identity,$FileSystemRight,$AccessControlType)
+        }
+
+        $Acl.SetAccessRule($FileSystemAccessRule)
+
+        try {
+            Set-Acl -Path $Path -AclObject $Acl -Verbose
+            if ($Recurse) {
+                $response = Read-Host -Prompt "Replace permissions on on all child objects [y/N]: "
+                If ($response = 'y') {
+                    $Children = Get-ChildItem -Path -Recurse
+                    foreach ($Child in $Children) {
+                        set-acl -Path $Child.FullName -AclObject $Acl -verbose
+                    }
+                }
+            }
+
+        } catch {
+            throw $_
+        }
+    }
+}
