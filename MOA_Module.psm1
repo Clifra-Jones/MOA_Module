@@ -1,5 +1,6 @@
 using namespace System.Collections.Generic
 using namespace System.Security.AccessControl
+using namespace System.Security.Cryptography.X509Certificates
 function ConvertFrom-Html {
     param([System.String] $html)
    
@@ -269,4 +270,205 @@ function Add-Ace() {
             throw $_
         }
     }
+}
+Function Import-X509Certificate () {
+    [CmdletBinding()]
+    Param(
+        [string]$StoreName = "My",
+        [ValidateSet('CurrentUser','LocalMachine')]
+        [string]$Scope = 'CurrentUser',
+        [Parameter(Mandatory)]
+        [string]$CertificatePath,
+        [securestring]$PassPhrase
+    )
+
+    $Store = [X509Store]::new($StoreName, $Scope, 'ReadWrite')
+    $Store.Add([X509Certificate2]::New($CertificatePath,$PassPhrase,[X509KeyStorageFlags]::PersistKeySet))
+    $Store.Dispose()
+}
+
+function ConvertTo-DataTable {
+    param(
+        [Parameter(Mandatory, ValueFromPipeline)]
+        [object[]]$InputObject
+    )
+    begin {
+        $dataTable = New-Object System.Data.DataTable
+    }
+    process {
+        foreach ($object in $InputObject) {
+            if ($dataTable.Columns.Count -eq 0) {
+                $object | Get-Member -MemberType Properties | ForEach-Object {
+                    $dataTable.Columns.Add($_.Name, $_.Type)
+                }
+            }
+            $dataRow = $dataTable.NewRow()
+            foreach ($column in $dataTable.Columns) {
+                $dataRow[$column.ColumnName] = $object."$($column.ColumnName)"
+            }
+            $dataTable.Rows.Add($dataRow)
+        }
+    }
+    end {
+        $dataTable
+    }
+}
+
+function Show-ProgressBar {
+    param (
+        [Parameter(Mandatory = $false)]
+        [int]$PercentComplete = 100,
+        
+        [Parameter(Mandatory = $false)]
+        [int]$BarLength = 60,
+        
+        [Parameter(Mandatory = $false)]
+        [char]$BarChar = '=',
+        
+        [Parameter(Mandatory = $false)]
+        [string]$Activity = "Processing",
+        
+        [Parameter(Mandatory = $false)]
+        [string]$Status = "",
+        
+        [Parameter(Mandatory = $false)]
+        [switch]$Completed,
+        
+        [Parameter(Mandatory = $false)]
+        [switch]$Spinner
+    )
+    
+    # Static variable to keep track of spinner state
+    if (-not [bool]::TryParse($script:spinnerInitialized, [ref]$null)) {
+        $script:spinnerInitialized = $true
+        $script:spinnerIndex = 0
+    }
+    
+    # Spinner characters in correct rotation order
+    $spinnerChars = @('-', '\', '|', '/', '-', '\', '|', '/')
+    
+    # Check if only the -Completed switch was provided (with default values for other parameters)
+    $onlyCompletedProvided = $Completed -and 
+                             $PSBoundParameters.Count -eq 1 -and
+                             $PercentComplete -eq 100 -and
+                             $BarLength -eq 60 -and
+                             $BarChar -eq '=' -and
+                             $Activity -eq "Processing" -and
+                             $Status -eq "" -and
+                             (-not $Spinner)
+    
+    # If only -Completed is specified, clear the progress bar line
+    if ($onlyCompletedProvided) {
+        # Create a blank line that overwrites the existing progress bar
+        $clearLine = "`r" + " " * 200 + "`r"  # 200 spaces should be enough to clear most lines
+        Write-Host $clearLine -NoNewline
+        return
+    }
+    
+    # Check if only -Completed and -Spinner were provided
+    $onlyCompletedAndSpinnerProvided = $Completed -and 
+                                      $Spinner -and
+                                      $PSBoundParameters.Count -eq 2 -and
+                                      $PercentComplete -eq 100 -and
+                                      $BarLength -eq 60 -and
+                                      $BarChar -eq '=' -and
+                                      $Activity -eq "Processing" -and
+                                      $Status -eq ""
+    
+    # If only -Completed and -Spinner are specified, clear the spinner line
+    if ($onlyCompletedAndSpinnerProvided) {
+        # Create a blank line that overwrites the existing spinner
+        $clearLine = "`r" + " " * 200 + "`r"  # 200 spaces should be enough to clear most lines
+        Write-Host $clearLine -NoNewline
+        return
+    }
+    
+    # Build the display string
+    if ($Spinner) {
+        # Get the current spinner character
+        $currentSpinnerChar = $spinnerChars[$script:spinnerIndex]
+        
+        # Update spinner index for next call
+        $script:spinnerIndex = ($script:spinnerIndex + 1) % $spinnerChars.Length
+        
+        # Create spinner display
+        $displayString = "`r$Activity [$currentSpinnerChar]"
+    }
+    else {
+        # Regular progress bar
+        # Ensure percent is within valid range
+        $PercentComplete = [Math]::Max(0, [Math]::Min(100, $PercentComplete))
+        
+        # Calculate how many bar characters to display
+        $completedChars = [Math]::Floor(($BarLength * $PercentComplete) / 100)
+        
+        # Build the progress bar
+        $progressBar = ""
+        for ($i = 0; $i -lt $completedChars; $i++) {
+            $progressBar += $BarChar
+        }
+        
+        $remainingBar = ""
+        for ($i = 0; $i -lt ($BarLength - $completedChars); $i++) {
+            $remainingBar += " "
+        }
+        
+        # Build the display string for progress bar
+        $displayString = "`r$Activity [$progressBar$remainingBar] $PercentComplete%"
+    }
+    
+    # Add status if provided
+    if (-not [string]::IsNullOrWhiteSpace($Status)) {
+        $displayString += " - $Status"
+    }
+    
+    # Display the progress indicator
+    Write-Host $displayString -NoNewline
+    
+    # If -Completed is specified with custom parameters, add a newline to finalize and keep it visible
+    if ($Completed -and (-not $onlyCompletedProvided) -and (-not $onlyCompletedAndSpinnerProvided)) {
+        Write-Host ""
+    }
+    <#
+    .SYNOPSIS
+        Display a progress bar or spinner in the console.
+    .DESCRIPTION
+        Display a progress bar or spinner in the console. The progress bar can be customized with different lengths, characters, and activity descriptions.
+    .PARAMETER PercentComplete
+        The percentage of completion for the progress bar. Must be an integer between 0 and 100. Default is 100.
+    .PARAMETER BarLength
+        The length of the progress bar in characters. Default is 60.
+    .PARAMETER BarChar
+        The character to use for the progress bar. Default is '='.
+    .PARAMETER Activity
+        The description of the activity being displayed. Default is "Processing".
+    .PARAMETER Status
+        Additional status information to display alongside the progress bar.
+    .PARAMETER Completed
+        Indicates that the progress bar is complete and should be finalized. 
+        If this switch is used, the progress bar will be cleared after displaying the final state.
+        If the parameters for the progress bar are customized, the final state will be displayed with those customizations.
+    .PARAMETER Spinner
+        Indicates that a spinner should be displayed instead of a progress bar. 
+        The spinner will cycle through a set of characters to indicate activity.
+    .EXAMPLE    
+        Show-ProgressBar -PercentComplete 50 -BarLength 40 -BarChar '#' -Activity "Downloading" -Status "File 1 of 10"
+        Display a progress bar with 50% completion, a length of 40 characters, using '#' as the bar character, 
+        and showing the activity as "Downloading" with the status "File 1 of 10".
+    .EXAMPLE
+        Show-ProgressBar -Spinner -Activity "Processing"
+        Display a spinner with the activity "Processing" to indicate ongoing activity.
+    .EXAMPLE
+        Show-ProgressBar -Completed
+        Clear the progress bar line after completion.
+    .EXAMPLE    
+        Show-ProgressBar -Completed -Activity "Completed" -Status "All items processed"
+        Display a final completion message with the activity "Completed" and status "All items processed".
+    .EXAMPLE
+        Show-ProgressBar -Completed -Activity "Completed" -Status "All items processed" -PercentComplete 100
+        Display a final completion message with the activity "Completed" and status "All items processed and 100% complete".
+    .NOTES
+        This is a cleaner progress bar than the one provided in the PowerShell, which can be customized with 
+        different lengths, characters, and activity descriptions. It also supports displaying a spinner instead of a progress bar.
+    #>
 }
