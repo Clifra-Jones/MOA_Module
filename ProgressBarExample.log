@@ -1,0 +1,53 @@
+**********************
+PowerShell transcript start
+Start time: 20250320134615
+Username: fedora\cliff_williams
+RunAs User: fedora\cliff_williams
+Configuration Name: 
+Machine: fedora (Unix 6.13.7.100)
+Host Application: /opt/microsoft/powershell/7/pwsh.dll -NoProfile -EncodedCommand SQBtAHAAbwByAHQALQBNAG8AZAB1AGwAZQAgACcALwBoAG8AbQBlAC8AYwBsAGkAZgBmAF8AdwBpAGwAbABpAGEAbQBzAC8ALgB2AHMAYwBvAGQAZQAvAGUAeAB0AGUAbgBzAGkAbwBuAHMALwBtAHMALQB2AHMAYwBvAGQAZQAuAHAAbwB3AGUAcgBzAGgAZQBsAGwALQAyADAAMgA1AC4AMAAuADAALwBtAG8AZAB1AGwAZQBzAC8AUABvAHcAZQByAFMAaABlAGwAbABFAGQAaQB0AG8AcgBTAGUAcgB2AGkAYwBlAHMALwBQAG8AdwBlAHIAUwBoAGUAbABsAEUAZABpAHQAbwByAFMAZQByAHYAaQBjAGUAcwAuAHAAcwBkADEAJwA7ACAAUwB0AGEAcgB0AC0ARQBkAGkAdABvAHIAUwBlAHIAdgBpAGMAZQBzACAALQBIAG8AcwB0AE4AYQBtAGUAIAAnAFYAaQBzAHUAYQBsACAAUwB0AHUAZABpAG8AIABDAG8AZABlACAASABvAHMAdAAnACAALQBIAG8AcwB0AFAAcgBvAGYAaQBsAGUASQBkACAAJwBNAGkAYwByAG8AcwBvAGYAdAAuAFYAUwBDAG8AZABlACcAIAAtAEgAbwBzAHQAVgBlAHIAcwBpAG8AbgAgACcAMgAwADIANQAuADAALgAwACcAIAAtAEIAdQBuAGQAbABlAGQATQBvAGQAdQBsAGUAcwBQAGEAdABoACAAJwAvAGgAbwBtAGUALwBjAGwAaQBmAGYAXwB3AGkAbABsAGkAYQBtAHMALwAuAHYAcwBjAG8AZABlAC8AZQB4AHQAZQBuAHMAaQBvAG4AcwAvAG0AcwAtAHYAcwBjAG8AZABlAC4AcABvAHcAZQByAHMAaABlAGwAbAAtADIAMAAyADUALgAwAC4AMAAvAG0AbwBkAHUAbABlAHMAJwAgAC0ARQBuAGEAYgBsAGUAQwBvAG4AcwBvAGwAZQBSAGUAcABsACAALQBTAHQAYQByAHQAdQBwAEIAYQBuAG4AZQByACAAIgBQAG8AdwBlAHIAUwBoAGUAbABsACAARQB4AHQAZQBuAHMAaQBvAG4AIAB2ADIAMAAyADUALgAwAC4AMAAKAEMAbwBwAHkAcgBpAGcAaAB0ACAAKABjACkAIABNAGkAYwByAG8AcwBvAGYAdAAgAEMAbwByAHAAbwByAGEAdABpAG8AbgAuAAoACgBoAHQAdABwAHMAOgAvAC8AYQBrAGEALgBtAHMALwB2AHMAYwBvAGQAZQAtAHAAbwB3AGUAcgBzAGgAZQBsAGwACgBUAHkAcABlACAAJwBoAGUAbABwACcAIAB0AG8AIABnAGUAdAAgAGgAZQBsAHAALgAKACIAIAAtAEwAbwBnAEwAZQB2AGUAbAAgACcAVwBhAHIAbgBpAG4AZwAnACAALQBMAG8AZwBQAGEAdABoACAAJwAvAGgAbwBtAGUALwBjAGwAaQBmAGYAXwB3AGkAbABsAGkAYQBtAHMALwAuAGMAbwBuAGYAaQBnAC8AQwBvAGQAZQAvAGwAbwBnAHMALwAyADAAMgA1ADAAMwAyADAAVAAwADcAMQA0ADMANAAvAHcAaQBuAGQAbwB3ADEALwBlAHgAdABoAG8AcwB0AC8AbQBzAC0AdgBzAGMAbwBkAGUALgBwAG8AdwBlAHIAcwBoAGUAbABsACcAIAAtAFMAZQBzAHMAaQBvAG4ARABlAHQAYQBpAGwAcwBQAGEAdABoACAAJwAvAGgAbwBtAGUALwBjAGwAaQBmAGYAXwB3AGkAbABsAGkAYQBtAHMALwAuAGMAbwBuAGYAaQBnAC8AQwBvAGQAZQAvAFUAcwBlAHIALwBnAGwAbwBiAGEAbABTAHQAbwByAGEAZwBlAC8AbQBzAC0AdgBzAGMAbwBkAGUALgBwAG8AdwBlAHIAcwBoAGUAbABsAC8AcwBlAHMAcwBpAG8AbgBzAC8AUABTAEUAUwAtAFYAUwBDAG8AZABlAC0AMgAyADMAOAAyAC0AMgA1ADgAOAA2ADIALgBqAHMAbwBuACcAIAAtAEYAZQBhAHQAdQByAGUARgBsAGEAZwBzACAAQAAoACkAIAA=
+Process ID: 23258
+PSVersion: 7.5.0
+PSEdition: Core
+GitCommitId: 7.5.0
+OS: Fedora Linux 40 (Cinnamon)
+Platform: Unix
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1, 6.0, 7.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+WSManStackVersion: 3.0
+**********************
+Transcript started, output file is ProgressBarExample.log
+TerminatingError(Write-ConsoleOnly): "A positional parameter cannot be found that accepts argument '$null'."
+Write-ConsoleOnly: A positional parameter cannot be found that accepts argument '$null'.
+Write-ConsoleOnly: A positional parameter cannot be found that accepts argument '$null'.
+
+TerminatingError(Write-ConsoleOnly): "A positional parameter cannot be found that accepts argument '$null'."
+Write-ConsoleOnly: A positional parameter cannot be found that accepts argument '$null'.
+Write-ConsoleOnly: A positional parameter cannot be found that accepts argument '$null'.
+
+TerminatingError(Write-ConsoleOnly): "A positional parameter cannot be found that accepts argument '$null'."
+Write-ConsoleOnly: A positional parameter cannot be found that accepts argument '$null'.
+Write-ConsoleOnly: A positional parameter cannot be found that accepts argument '$null'.
+
+TerminatingError(Write-ConsoleOnly): "A positional parameter cannot be found that accepts argument '$null'."
+Write-ConsoleOnly: A positional parameter cannot be found that accepts argument '$null'.
+Write-ConsoleOnly: A positional parameter cannot be found that accepts argument '$null'.
+
+TerminatingError(Write-ConsoleOnly): "A positional parameter cannot be found that accepts argument '$null'."
+Write-ConsoleOnly: A positional parameter cannot be found that accepts argument '$null'.
+Write-ConsoleOnly: A positional parameter cannot be found that accepts argument '$null'.
+
+TerminatingError(Write-ConsoleOnly): "A positional parameter cannot be found that accepts argument '$null'."
+Write-ConsoleOnly: A positional parameter cannot be found that accepts argument '$null'.
+Write-ConsoleOnly: A positional parameter cannot be found that accepts argument '$null'.
+
+TerminatingError(Write-ConsoleOnly): "A positional parameter cannot be found that accepts argument '$null'."
+Write-ConsoleOnly: A positional parameter cannot be found that accepts argument '$null'.
+Write-ConsoleOnly: A positional parameter cannot be found that accepts argument '$null'.
+
+TerminatingError(Write-ConsoleOnly): "A positional parameter cannot be found that accepts argument '$null'."
+Write-ConsoleOnly: A positional parameter cannot be found that accepts argument '$null'.
+Write-ConsoleOnly: A positional parameter cannot be found that accepts argument '$null'.
+
+TerminatingError(Write-ConsoleOnly): "A positional parameter cannot be found that accepts argument '$null'."

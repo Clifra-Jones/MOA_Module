@@ -345,8 +345,34 @@ function Show-ProgressBar {
         [switch]$Completed,
         
         [Parameter(Mandatory = $false)]
-        [switch]$Spinner
+        [switch]$Spinner,
+        
+        [Parameter(Mandatory = $false)]
+        [System.ConsoleColor]$ForegroundColor = [Console]::ForegroundColor,
+        
+        [Parameter(Mandatory = $false)]
+        [System.ConsoleColor]$BarForegroundColor,
+        
+        [Parameter(Mandatory = $false)]
+        [System.ConsoleColor]$BarBackgroundColor
     )
+
+    # We are performing some parameter checking here
+    # we are doing this here because Parameter sets are two confusing and don't give meaningful error messages.
+    if ($PercentComplete -lt 0 -or $PercentComplete -gt 100) {
+        Write-Host "PercentComplete must be between 0 and 100." -ForegroundColor Red
+        return
+    }
+
+    if ($BarLength -lt 1) {
+        Write-Host "BarLength must be at least 1." -ForegroundColor Red
+        return
+    }
+
+    if ($BarForegroundColor -and $BarBackgroundColor -and $BarForegroundColor -eq $BarBackgroundColor) {
+        Write-Host "BarForegroundColor and BarBackgroundColor cannot be the same." -ForegroundColor Red
+        return
+    }
     
     # Static variable to keep track of spinner state
     if (-not [bool]::TryParse($script:spinnerInitialized, [ref]$null)) {
@@ -371,38 +397,109 @@ function Show-ProgressBar {
     if ($onlyCompletedProvided) {
         # Create a blank line that overwrites the existing progress bar
         $clearLine = "`r" + " " * 200 + "`r"  # 200 spaces should be enough to clear most lines
-        Write-ConsoleOnly $clearLine -NoNewline       
-        return
-    }
-    
-    # Check if only -Completed and -Spinner were provided
-    $onlyCompletedAndSpinnerProvided = $Completed -and 
-                                      $Spinner -and
-                                      $PSBoundParameters.Count -eq 2 -and
-                                      $PercentComplete -eq 100 -and
-                                      $BarLength -eq 60 -and
-                                      $BarChar -eq '=' -and
-                                      $Activity -eq "Processing" -and
-                                      $Status -eq ""
-    
-    # If only -Completed and -Spinner are specified, clear the spinner line
-    if ($onlyCompletedAndSpinnerProvided) {
-        # Create a blank line that overwrites the existing spinner
-        $clearLine = "`r" + " " * 200 + "`r"  # 200 spaces should be enough to clear most lines
         Write-ConsoleOnly $clearLine -NoNewline
         return
     }
     
     # Build the display string
     if ($Spinner) {
-        # Get the current spinner character
+        if ($Completed) {
+            # For completed spinners, we want to clear the line first to avoid residual characters
+            $clearLine = "`r" + " " * 200 + "`r"  # 200 spaces should be enough to clear most lines
+            Write-ConsoleOnly $clearLine -NoNewline
+            
+            # Then display the final state
+            $finalChar = $spinnerChars[0]  # Use the first spinner character for completion
+            
+            # Record the previous status length to ensure we clear it properly
+            $maxStatusLength = 0
+            foreach ($char in $spinnerChars) {
+                $tempStatus = "$Activity [$char]"
+                if (-not [string]::IsNullOrWhiteSpace($Status)) {
+                    $tempStatus += " - $Status"
+                }
+                $maxStatusLength = [Math]::Max($maxStatusLength, $tempStatus.Length)
+            }
+            
+            # Add padding to ensure we clear the longest possible status message
+            $padding = [string]::new(' ', $maxStatusLength + 20) # Extra padding to be safe
+            Write-ConsoleOnly "`r$padding`r" -NoNewline
+            
+            if ($PSBoundParameters.ContainsKey('BarForegroundColor') -or $PSBoundParameters.ContainsKey('BarBackgroundColor')) {
+                # Final state with custom colors
+                $spinnerFg = if ($PSBoundParameters.ContainsKey('BarForegroundColor')) { $BarForegroundColor } else { $ForegroundColor }
+                $spinnerBg = if ($PSBoundParameters.ContainsKey('BarBackgroundColor')) { $BarBackgroundColor } else { [Console]::BackgroundColor }
+                
+                # Display the prefix with main foreground color
+                Write-ConsoleOnly "$Activity [" -ForegroundColor $ForegroundColor -NoNewline
+                
+                # Display the spinner character with its specific colors
+                Write-ConsoleOnly "$finalChar" -ForegroundColor $spinnerFg -BackgroundColor $spinnerBg -NoNewline
+                
+                # Display the suffix with main foreground color
+                Write-ConsoleOnly "]" -ForegroundColor $ForegroundColor -NoNewline
+                
+                # Add status if provided
+                if (-not [string]::IsNullOrWhiteSpace($Status)) {
+                    Write-ConsoleOnly " - $Status" -ForegroundColor $ForegroundColor
+                } else {
+                    Write-ConsoleOnly "" -ForegroundColor $ForegroundColor
+                }
+            }
+            else {
+                # Final state with default colors
+                $finalDisplay = "$Activity [$finalChar]"
+                if (-not [string]::IsNullOrWhiteSpace($Status)) {
+                    $finalDisplay += " - $Status"
+                }
+                Write-ConsoleOnly $finalDisplay -ForegroundColor $ForegroundColor
+            }
+            
+            return
+        }
+        
+        # Get the current spinner character for animated spinner
         $currentSpinnerChar = $spinnerChars[$script:spinnerIndex]
         
         # Update spinner index for next call
         $script:spinnerIndex = ($script:spinnerIndex + 1) % $spinnerChars.Length
         
         # Create spinner display
-        $displayString = "`r$Activity [$currentSpinnerChar]"
+        $displayStringPrefix = "$Activity ["
+        $displayStringSuffix = "]"
+        
+        # Handle the spinner character separately to apply specific colors
+        if ($PSBoundParameters.ContainsKey('BarForegroundColor') -or $PSBoundParameters.ContainsKey('BarBackgroundColor')) {
+            # Prepare spinner character with specific colors
+            $spinnerFg = if ($PSBoundParameters.ContainsKey('BarForegroundColor')) { $BarForegroundColor } else { $ForegroundColor }
+            $spinnerBg = if ($PSBoundParameters.ContainsKey('BarBackgroundColor')) { $BarBackgroundColor } else { [Console]::BackgroundColor }
+            
+            # Display the prefix with main foreground color
+            Write-ConsoleOnly "`r$displayStringPrefix" -ForegroundColor $ForegroundColor -NoNewline
+            
+            # Display the spinner character with its specific colors
+            Write-ConsoleOnly "$currentSpinnerChar" -ForegroundColor $spinnerFg -BackgroundColor $spinnerBg -NoNewline
+            
+            # Display the suffix with main foreground color
+            Write-ConsoleOnly "$displayStringSuffix" -ForegroundColor $ForegroundColor -NoNewline
+            
+            # Add status if provided
+            if (-not [string]::IsNullOrWhiteSpace($Status)) {
+                Write-ConsoleOnly " - $Status" -ForegroundColor $ForegroundColor -NoNewline
+            }
+        }
+        else {
+            # Use the default/specified foreground color for everything
+            Write-ConsoleOnly "`r$Activity [$currentSpinnerChar]" -ForegroundColor $ForegroundColor -NoNewline
+            
+            # Add status if provided
+            if (-not [string]::IsNullOrWhiteSpace($Status)) {
+                Write-ConsoleOnly " - $Status" -ForegroundColor $ForegroundColor -NoNewline
+            }
+        }
+        
+        # If -Completed is specified with -Spinner, add a newline to finalize and show completion
+        # This block was moved to the beginning of the Spinner section
     }
     else {
         # Regular progress bar
@@ -412,76 +509,106 @@ function Show-ProgressBar {
         # Calculate how many bar characters to display
         $completedChars = [Math]::Floor(($BarLength * $PercentComplete) / 100)
         
-        # Build the progress bar
-        $progressBar = ""
-        for ($i = 0; $i -lt $completedChars; $i++) {
-            $progressBar += $BarChar
+        # Check if we need to apply special colors to the bar
+        $useSpecialBarColors = $PSBoundParameters.ContainsKey('BarForegroundColor') -or $PSBoundParameters.ContainsKey('BarBackgroundColor')
+        
+        if ($useSpecialBarColors) {
+            # Write the first part of the string with main foreground color
+            Write-ConsoleOnly "`r$Activity [" -ForegroundColor $ForegroundColor -NoNewline
+            
+            # Progress bar with special colors
+            $barFg = if ($PSBoundParameters.ContainsKey('BarForegroundColor')) { $BarForegroundColor } else { $ForegroundColor }
+            $barBg = if ($PSBoundParameters.ContainsKey('BarBackgroundColor')) { $BarBackgroundColor } else { [Console]::BackgroundColor }
+            
+            # Write the completed part of the bar with special colors
+            if ($completedChars -gt 0) {
+                $progressBar = [string]::new($BarChar, $completedChars)
+                Write-ConsoleOnly $progressBar -ForegroundColor $barFg -BackgroundColor $barBg -NoNewline
+            }
+            
+            # Write the remaining part of the bar with main foreground color and default background
+            $remainingLength = $BarLength - $completedChars
+            if ($remainingLength -gt 0) {
+                $remainingBar = [string]::new(' ', $remainingLength)
+                # Always use default background for the remaining part
+                Write-ConsoleOnly $remainingBar -ForegroundColor $ForegroundColor -NoNewline
+            }
+            
+            # Write the rest of the string with main foreground color
+            $statusText = "] $PercentComplete%"
+            if (-not [string]::IsNullOrWhiteSpace($Status)) {
+                $statusText += " - $Status"
+            }
+            Write-ConsoleOnly $statusText -ForegroundColor $ForegroundColor -NoNewline
+        }
+        else {
+            # Build the progress bar (standard version with no special colors)
+            $progressBar = [string]::new($BarChar, $completedChars)
+            $remainingBar = [string]::new(' ', $BarLength - $completedChars)
+            
+            # Build the display string for progress bar
+            $displayString = "`r$Activity [$progressBar$remainingBar] $PercentComplete%"
+            
+            # Add status if provided
+            if (-not [string]::IsNullOrWhiteSpace($Status)) {
+                $displayString += " - $Status"
+            }
+            
+            # Display the progress indicator with the specified foreground color
+            Write-ConsoleOnly $displayString -ForegroundColor $ForegroundColor -NoNewline
         }
         
-        $remainingBar = ""
-        for ($i = 0; $i -lt ($BarLength - $completedChars); $i++) {
-            $remainingBar += " "
+        # If -Completed is specified with custom parameters, add a newline to finalize and keep it visible
+        if ($Completed) {
+            Write-ConsoleOnly "" -ForegroundColor $ForegroundColor
         }
-        
-        # Build the display string for progress bar
-        $displayString = "`r$Activity [$progressBar$remainingBar] $PercentComplete%"
-    }
-    
-    # Add status if provided
-    if (-not [string]::IsNullOrWhiteSpace($Status)) {
-        $displayString += " - $Status"
-    }
-    
-    # Display the progress indicator
-    Write-ConsoleOnly $displayString -NoNewline
-    
-    # If -Completed is specified with custom parameters, add a newline to finalize and keep it visible
-    if ($Completed -and (-not $onlyCompletedProvided) -and (-not $onlyCompletedAndSpinnerProvided)) {
-        Write-ConsoleOnly ""
-    } else {
-
     }
     <#
     .SYNOPSIS
-        Display a progress bar or spinner in the console.
+        Displays a progress bar in the console.
     .DESCRIPTION
-        Display a progress bar or spinner in the console. The progress bar can be customized with different lengths, characters, and activity descriptions.
+        Displays a progress bar in the console. The progress bar can be used to show the progress of a task.
+        The progress bar can be displayed in two modes:
+        1. Normal progress bar: Shows a progress bar that fills up as the task progresses.
+        2. Spinner: Shows a spinner that rotates to indicate that the task is in progress.
     .PARAMETER PercentComplete
-        The percentage of completion for the progress bar. Must be an integer between 0 and 100. Default is 100.
+        The percentage of the task that is complete. This value should be between 0 and 100.
     .PARAMETER BarLength
-        The length of the progress bar in characters. Default is 60.
+        The length of the progress bar. The default value is 60.
     .PARAMETER BarChar
-        The character to use for the progress bar. Default is '='.
+        The character to use for the progress bar. The default value is '='.
     .PARAMETER Activity
-        The description of the activity being displayed. Default is "Processing".
+        The activity that is being performed. The default value is "Processing".
     .PARAMETER Status
-        Additional status information to display alongside the progress bar.
+        Additional information about the task. This information is displayed next to the progress bar.
     .PARAMETER Completed
-        Indicates that the progress bar is complete and should be finalized. 
-        If this switch is used, the progress bar will be cleared after displaying the final state.
-        If the parameters for the progress bar are customized, the final state will be displayed with those customizations.
+        Indicates that the task is complete. When this switch is used, the progress bar is filled to 100% and the completion message is displayed.
+        If used with the -Spinner switch, the spinner will stop and the completion message will be displayed.
+        if used with -Activity or -Status the barf remains on the console and the Activity and Status message is displayed,
+        if used without any other parameters the progress bar is cleared.
     .PARAMETER Spinner
-        Indicates that a spinner should be displayed instead of a progress bar. 
-        The spinner will cycle through a set of characters to indicate activity.
-    .EXAMPLE    
-        Show-ProgressBar -PercentComplete 50 -BarLength 40 -BarChar '#' -Activity "Downloading" -Status "File 1 of 10"
-        Display a progress bar with 50% completion, a length of 40 characters, using '#' as the bar character, 
-        and showing the activity as "Downloading" with the status "File 1 of 10".
+        Indicates that a spinner should be displayed instead of a progress bar. The spinner rotates to indicate that the task is in progress.
+    .PARAMETER ForegroundColor
+        The color of the all text and the completion message. The default value is the current console foreground color.
+    .PARAMETER BarForegroundColor
+        The color of the progress bar. The default value is the ForegroundColor.
+    .PARAMETER BarBackgroundColor
+        The background color of the progress bar. The default value is the current console background color.
     .EXAMPLE
-        Show-ProgressBar -Spinner -Activity "Processing"
-        Display a spinner with the activity "Processing" to indicate ongoing activity.
+        Show-ProgressBar -PercentComplete 50 -Activity "Processing" -Status "Step 1 of 2"
     .EXAMPLE
-        Show-ProgressBar -Completed
-        Clear the progress bar line after completion.
-    .EXAMPLE    
-        Show-ProgressBar -Completed -Activity "Completed" -Status "All items processed"
-        Display a final completion message with the activity "Completed" and status "All items processed".
+        Show-ProgressBar -Complete -PercentComplete 100 -Activity "Processing" -Status "Complete"
     .EXAMPLE
-        Show-ProgressBar -Completed -Activity "Completed" -Status "All items processed" -PercentComplete 100
-        Display a final completion message with the activity "Completed" and status "All items processed and 100% complete".
+        Show-ProgressBar -Spinner -Activity "Processing" -Status "Step 1 of 2"  
+    .EXAMPLE
+        Show-ProgressBar -Spinner -Complete -Activity "Processing" -Status "Complete"
     .NOTES
-        This is a cleaner progress bar than the one provided in the PowerShell, which can be customized with 
-        different lengths, characters, and activity descriptions. It also supports displaying a spinner instead of a progress bar.
+        If the -Spinner parameter is specified and the -BarChar parameter is set, -BarChar will be ignored..
+        The -BarForegroundColor and -BarBackgroundColor parameters cannot be the same.
+        PercentComplete must be between 0 and 100.
+        BarLength must be at least 1.
+        This function DOES NOT support nested progress bars (Nested loops).
+
     #>
 }
 
