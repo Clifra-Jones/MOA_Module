@@ -76,7 +76,6 @@ FunctionsToExport = @(
     'Add-Ace',
     'ConvertTo-DataTable',
     'Show-ProgressBar',
-    'Restore-Computer',
     'Debug-String',
     'Get-FolderStats',
     'Get-FunctionNamesInFiles',
@@ -85,7 +84,8 @@ FunctionsToExport = @(
     'ConvertTo-LocalTime',
     'ConvertFrom-LocalTime',
     'ConvertFrom-UTC',
-    'ConvertTo-UTC'
+    'ConvertTo-UTC',
+    'Write-ConsoleOnly'
 )
 
 # Cmdlets to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no cmdlets to export.

@@ -2,8 +2,6 @@ using namespace System.Collections.Generic
 using namespace System.Security.AccessControl
 using namespace System.Security.Cryptography.X509Certificates
 
-#Requires -Modules @{ModuleName = "ActiveDirectory"; ModuleVersion = "1.0.0.0"}
-
 function ConvertFrom-Html {
     param([System.String] $html)
    
@@ -22,9 +20,9 @@ function ConvertFrom-Html {
     # write-verbose 'condensed whitespace: `n`n$html`n'
    
     # Add line breaks
-    @('div','p','blockquote','h[1-9]') | % { $html = $html -replace '</?$_[^>]*?>.*?</$_>', ('`n' + '$0' )} 
+    @('div','p','blockquote','h[1-9]') | ForEach-Object { $html = $html -replace '</?$_[^>]*?>.*?</$_>', ('`n' + '$0' )} 
     # Add line breaks for self-closing tags
-    @('div','p','blockquote','h[1-9]','br') | % { $html = $html -replace '<$_[^>]*?/>', ('$0' + '`n')} 
+    @('div','p','blockquote','h[1-9]','br') | ForEach-Object { $html = $html -replace '<$_[^>]*?/>', ('$0' + '`n')} 
     # write-verbose 'added line breaks: `n`n$html`n'
    
     #strip tags 
@@ -242,6 +240,12 @@ function Add-Ace() {
         [switch]$Recurse
     )
 
+    # Test Operating system
+    If (-Not $IsWindows) {
+        Write-Host "This function is only available on Windows"
+        return
+    }
+
     If (Test-Path $Path) {
         try {
             $Acl = Get-Acl -Path $Path
@@ -259,13 +263,16 @@ function Add-Ace() {
 
         try {
             Set-Acl -Path $Path -AclObject $Acl -Verbose
+
             if ($Recurse) {
                 $response = Read-Host -Prompt "Replace permissions on on all child objects [y/N]: "
-                If ($response = 'y') {
+                If ($response -eq 'y') {
                     $Children = Get-ChildItem -Path -Recurse
                     foreach ($Child in $Children) {
                         set-acl -Path $Child.FullName -AclObject $Acl -verbose
                     }
+                } else {
+                    Write-Host "Permissions not applied to child objects"
                 }
             }
 
@@ -364,7 +371,7 @@ function Show-ProgressBar {
     if ($onlyCompletedProvided) {
         # Create a blank line that overwrites the existing progress bar
         $clearLine = "`r" + " " * 200 + "`r"  # 200 spaces should be enough to clear most lines
-        Write-Host $clearLine -NoNewline
+        Write-ConsoleOnly $clearLine -NoNewline
         return
     }
     
@@ -382,7 +389,7 @@ function Show-ProgressBar {
     if ($onlyCompletedAndSpinnerProvided) {
         # Create a blank line that overwrites the existing spinner
         $clearLine = "`r" + " " * 200 + "`r"  # 200 spaces should be enough to clear most lines
-        Write-Host $clearLine -NoNewline
+        Write-ConsoleOnly $clearLine -NoNewline
         return
     }
     
@@ -426,11 +433,11 @@ function Show-ProgressBar {
     }
     
     # Display the progress indicator
-    Write-Host $displayString -NoNewline
+    Write-ConsoleOnly $displayString -NoNewline
     
     # If -Completed is specified with custom parameters, add a newline to finalize and keep it visible
     if ($Completed -and (-not $onlyCompletedProvided) -and (-not $onlyCompletedAndSpinnerProvided)) {
-        Write-Host ""
+        Write-ConsoleOnly ""
     }
     <#
     .SYNOPSIS
@@ -476,113 +483,6 @@ function Show-ProgressBar {
     #>
 }
 
-function Recover_Object {
-    [CmdletBinding()]
-    param (
-        [Parameter(Mandatory = $true)]
-        [Object]$RestoredObject
-    )
-
-    $recoveryinfos = Get-ADObject -IncludeDeletedObjects -Filter {lastKnownParent -eq $restoredobject.DistinguishedName -and Deleted -eq $True -and objectClass -eq 'msFVE-RecoveryInformation'}
-    ForEach($recoveryinfo in $recoveryinfos)
-    {
-      If ($recoveryinfo)
-      {
-        "Recovery information found, trying to restore..."
-        $recoveryinfo | Restore-ADObject
-        Start-Sleep -s 5
-        $restoredinfo = Get-ADObject -Filter {ObjectGUID -eq $recoveryinfo.ObjectGUID}
-        If ($restoredinfo)
-        {
-          "Recovery information successfully restored."
-        }
-        Else
-        {
-          "Could not restore recovery information, aborting script."
-          return $false
-        }
-      }
-      Else
-      {
-        "No recovery information found for computer object, aborting script."
-        return $true
-      }
-    }
-}
-
-function Restore-Computer() {
-    [CmdletBinding()]
-    param (
-        [Parameter(Mandatory = $true)]
-        [string]$ComputerName
-    )
-
-    if (-not $IsWindows) {
-        Write-Error "This cmdlet is only available on Windows."
-        return $false
-    }
-
-    If ($ComputerName.substring($computername.length - 1, 1) -ne '$')
-    {
-        $ComputerName += '$'
-    }
-
-    $existing = Get-ADObject -Filter {sAMAccountName -eq $ComputerName}
-    If (!$existing)
-    {
-        "No existing computer object found, searching for deleted objects."
-        $deleted = Get-ADObject -IncludeDeletedObjects -Filter {sAMAccountName -eq $ComputerName -and Deleted -eq $True}
-        If ($deleted)
-        {
-        "Deleted object found, trying to restore…"
-        $deleted | Restore-ADObject
-        Start-Sleep -s 5
-        $restoredobject = Get-ADObject -Filter {sAMAccountName -eq $ComputerName}
-        If ($restoredobject)
-        {
-            "Computer object successfully restored. Trying to find recovery information…"
-            $Result = Recover_Object -RestoredObject $restoredobject
-            If ($Result)
-            {
-            "Recovery of computer object succeeded."
-            "Finished."
-            return $true
-            }
-            Else
-            {
-            "Something went wrong. Could not find recovery information in AD Object, aborting script."
-            return $false
-            }
-        }
-        Else
-        {
-            "Something went wrong. Could not find restored object, aborting script."
-            return $false
-        }
-        }
-        Else
-        {
-        "No deleted computer found, aborting script"
-        return $false;
-        }
-    }
-    Else
-    {
-        "Computer already exists, trying to recover keys"
-        $ComputerObject = Get-ADObject -Filter {sAMAccountName -eq $ComputerName}
-        If ($ComputerObject) {
-        return recoverKeys $ComputerObject
-        }
-        return $false
-    }
-    "Restore of computer object succeeded."
-    "Finished."
-    return $true
-    <#
-    
-    #>
-}
-
 function Update-ComputerDNSServers () {
 	[CmdletBinding()]
 	Param (
@@ -593,6 +493,11 @@ function Update-ComputerDNSServers () {
 		[Parameter(Mandatory=$false)]
 		$DNSServer2
 	)
+
+    if (-not $IsWindows) {
+        Write-Host "This function is only available on Windows"
+        return
+    }
 	
 	Write-Host "Checking if computer $ComputerName is accessible"
 	If (-not (Test-Connection -ComputerName $ComputerName -Quiet)) { 
@@ -1045,23 +950,6 @@ function Get-FunctionNamesInFiles () {
     #>
 }
 
-Param( 
-    [Parameter(
-        Mandatory = $true
-    )]
-    [String] $ProcessName,
-    [Parameter(
-        Mandatory = $true,
-        ParameterSetName = "CPU"
-    )]
-    [Switch] $CPU,
-    [Parameter(
-        Mandatory = $true,
-        ParameterSetName="Memory"
-    )]
-    [Switch] $Memory
-)
-
 function Get-ProcessStatus () {
     [CmdletBinding()]
     Param (
@@ -1110,6 +998,7 @@ function Get-ProcessStatus () {
 }
 
 function Update-DataBaseMailCredentials {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingPlainTextForPassword', '')]
     [CmdletBinding()]
     Param (
         [Parameter(Mandatory)]
@@ -1119,8 +1008,8 @@ function Update-DataBaseMailCredentials {
         [string]$MailAccount,
         [Parameter(Mandatory)]
         [string]$MailUser,
-        [Parameter(Mandatory)]
-        [string]$MailPassword,
+        [Parameter(Mandatory)]        
+        [string]$MailPassword
     )
 
     # This SQL script retrieves the current SQL Database Mail configurations
@@ -1308,5 +1197,71 @@ function ConvertTo-UTC() {
     .EXAMPLE
         ConvertTo-UTC -DateTime (Get-Date)
         Convert the current local time to UTC time.
+    #>
+}
+
+function Write-ConsoleOnly {
+    [CmdletBinding()]
+    param(
+        [Parameter(Position=0, ValueFromPipeline=$true)]
+        [string]$Message='',
+        
+        [Parameter()]
+        [ConsoleColor]$ForegroundColor = [Console]::ForegroundColor,
+        
+        [Parameter()]
+        [ConsoleColor]$BackgroundColor = [Console]::BackgroundColor,
+        
+        [Parameter()]
+        [switch]$NoNewline
+    )
+    
+    # Save original colors
+    $originalForeground = [Console]::ForegroundColor
+    $originalBackground = [Console]::BackgroundColor
+    
+    # Set new colors
+    [Console]::ForegroundColor = $ForegroundColor
+    [Console]::BackgroundColor = $BackgroundColor
+    
+    # Write to console only
+    if ($NoNewline) {
+        [Console]::Write($Message)
+    } else {
+        [Console]::WriteLine($Message)
+    }
+    
+    # Restore original colors
+    [Console]::ForegroundColor = $originalForeground
+    [Console]::BackgroundColor = $originalBackground
+
+    <#
+    .SYNOPSIS
+        Write a message to the console only.
+    .DESCRIPTION
+        Write a message to the console only, without sending it to the pipeline.
+    .PARAMETER Message
+        The message to write to the console.
+    .PARAMETER ForegroundColor
+        The foreground color of the message.
+    .PARAMETER BackgroundColor
+        The background color of the message.
+    .PARAMETER NoNewline
+        If present, the message is written without a newline character.
+    .Example
+        Write-ConsoleOnly -Message "This is a test message"
+        Write the message "This is a test message" to the console.
+    .EXAMPLE
+        Write-ConsoleOnly -Message "This is a test message" -ForegroundColor Green -BackgroundColor Black
+        Write the message "This is a test message" to the console with green foreground and black background colors.
+    .EXAMPLE    
+        Write-ConsoleOnly -Message "This is a test message" -ForegroundColor Green -BackgroundColor Black -NoNewline
+        Write the message "This is a test message" to the console with green foreground and black background colors without a newline character.    
+    .EXAMPLE
+        "This is a test message" | Write-ConsoleOnly -ForegroundColor Green -BackgroundColor Black
+        Write the message "This is a test message" to the console with green foreground and black background colors.
+    .EXAMPLE
+        "This is a test message" | Write-ConsoleOnly -ForegroundColor Green -BackgroundColor Black -NoNewline
+        Write the message "This is a test message" to the console with green foreground and black background colors without a newline character.
     #>
 }
