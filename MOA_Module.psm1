@@ -1,6 +1,9 @@
 using namespace System.Collections.Generic
 using namespace System.Security.AccessControl
 using namespace System.Security.Cryptography.X509Certificates
+
+#Requires -Modules @{ModuleName = "ActiveDirectory"; ModuleVersion = "1.0.0.0"}
+
 function ConvertFrom-Html {
     param([System.String] $html)
    
@@ -470,5 +473,840 @@ function Show-ProgressBar {
     .NOTES
         This is a cleaner progress bar than the one provided in the PowerShell, which can be customized with 
         different lengths, characters, and activity descriptions. It also supports displaying a spinner instead of a progress bar.
+    #>
+}
+
+function Recover_Object {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        [Object]$RestoredObject
+    )
+
+    $recoveryinfos = Get-ADObject -IncludeDeletedObjects -Filter {lastKnownParent -eq $restoredobject.DistinguishedName -and Deleted -eq $True -and objectClass -eq 'msFVE-RecoveryInformation'}
+    ForEach($recoveryinfo in $recoveryinfos)
+    {
+      If ($recoveryinfo)
+      {
+        "Recovery information found, trying to restore..."
+        $recoveryinfo | Restore-ADObject
+        Start-Sleep -s 5
+        $restoredinfo = Get-ADObject -Filter {ObjectGUID -eq $recoveryinfo.ObjectGUID}
+        If ($restoredinfo)
+        {
+          "Recovery information successfully restored."
+        }
+        Else
+        {
+          "Could not restore recovery information, aborting script."
+          return $false
+        }
+      }
+      Else
+      {
+        "No recovery information found for computer object, aborting script."
+        return $true
+      }
+    }
+}
+
+function Restore-Computer() {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$ComputerName
+    )
+
+    if (-not $IsWindows) {
+        Write-Error "This cmdlet is only available on Windows."
+        return $false
+    }
+
+    If ($ComputerName.substring($computername.length - 1, 1) -ne '$')
+    {
+        $ComputerName += '$'
+    }
+
+    $existing = Get-ADObject -Filter {sAMAccountName -eq $ComputerName}
+    If (!$existing)
+    {
+        "No existing computer object found, searching for deleted objects."
+        $deleted = Get-ADObject -IncludeDeletedObjects -Filter {sAMAccountName -eq $ComputerName -and Deleted -eq $True}
+        If ($deleted)
+        {
+        "Deleted object found, trying to restore…"
+        $deleted | Restore-ADObject
+        Start-Sleep -s 5
+        $restoredobject = Get-ADObject -Filter {sAMAccountName -eq $ComputerName}
+        If ($restoredobject)
+        {
+            "Computer object successfully restored. Trying to find recovery information…"
+            $Result = Recover_Object -RestoredObject $restoredobject
+            If ($Result)
+            {
+            "Recovery of computer object succeeded."
+            "Finished."
+            return $true
+            }
+            Else
+            {
+            "Something went wrong. Could not find recovery information in AD Object, aborting script."
+            return $false
+            }
+        }
+        Else
+        {
+            "Something went wrong. Could not find restored object, aborting script."
+            return $false
+        }
+        }
+        Else
+        {
+        "No deleted computer found, aborting script"
+        return $false;
+        }
+    }
+    Else
+    {
+        "Computer already exists, trying to recover keys"
+        $ComputerObject = Get-ADObject -Filter {sAMAccountName -eq $ComputerName}
+        If ($ComputerObject) {
+        return recoverKeys $ComputerObject
+        }
+        return $false
+    }
+    "Restore of computer object succeeded."
+    "Finished."
+    return $true
+    <#
+    
+    #>
+}
+
+function Update-ComputerDNSServers () {
+	[CmdletBinding()]
+	Param (
+		[Parameter(Mandatory=$true)]
+		$ComputerName,
+		[Parameter(Mandatory=$true)]
+		$DNSServer1,
+		[Parameter(Mandatory=$false)]
+		$DNSServer2
+	)
+	
+	Write-Host "Checking if computer $ComputerName is accessible"
+	If (-not (Test-Connection -ComputerName $ComputerName -Quiet)) { 
+		Write-Host "Server $ComputerName not accessible"
+		return 
+	} else {
+		Write-Host "Server $ComputerName is accessible via ping"
+	}
+
+	$SessionOptions = New-PSSessionOption -SkipCACheck -SkipCNCheck -SkipRevocationCheck
+	$Session = New-PSSession -ComputerName $ComputerName -UseSSL -SessionOption $SessionOptions -ErrorAction SilentlyContinue
+	If ($Session) {
+		Write-Host "Server $ComputerName is accessible via WinRM over HTTPS"
+		Invoke-Command -Session $Session -ScriptBlock {
+			$NICs = Get-WmiObject -Class Win32_NetworkAdapterConfiguration | Where-Object { $_.IPEnabled -eq $true }
+			foreach ($NIC in $NICs) {
+				$DNSSearchOrder = $NIC.DNSServerSearchOrder
+				for ($i=0; $i -lt $DNSSearchOrder.length; $i++) {
+					If ($i -eq 0) {
+						$DNSSearchOrder[$i] = $using:DNSServer1		
+					} elseIf ($i -eq 1) {
+						$DNSSearchOrder[$i] = $using:DNSServer2
+					}
+				}
+				[void]$NIC.SetDNSServerSearchOrder($DNSSearchOrder)
+				[void]$NIC.SetDynamicDNSRegistration("TRUE")
+			}
+		}
+		Remove-PSSession -Session $Session
+	} else {
+		Write-Host "Server $ComputerName is not accessible via WinRM over HTTPS"
+		$Session = New-PSSession -ComputerName $ComputerName -ErrorAction SilentlyContinue
+		If ($Session) {
+			Write-Host "Server $ComputerName is accessible via WinRM over HTTP"
+			Invoke-Command -Session $Session -ScriptBlock {
+				$NICs = Get-WmiObject -Class Win32_NetworkAdapterConfiguration | Where-Object { $_.IPEnabled -eq $true }
+				foreach ($NIC in $NICs) {
+					$DNSSearchOrder = $NIC.DNSServerSearchOrder
+					for ($i=0; $i -lt $DNSSearchOrder.length; $i++) {
+						If ($i -eq 0) {
+							$DNSSearchOrder[$i] = $using:DNSServer1		
+						} elseIf ($i -eq 1) {
+							$DNSSearchOrder[$i] = $using:DNSServer2
+						}
+					}
+					[void]$NIC.SetDNSServerSearchOrder($DNSSearchOrder)
+					[void]$NIC.SetDynamicDNSRegistration("TRUE")
+				}
+			}
+			Remove-PSSession -Session $Session
+		} else {
+			Write-Host "Server $ComputerName is not accessible via WinRM over HTTPS or HTTP"
+		}
+	}
+    <#
+    .SYNOPSIS
+        Update the DNS servers for a remote computer.
+    .DESCRIPTION
+        Update the DNS servers for a remote computer by setting the primary and secondary DNS server IP addresses.
+        The target computer must have a WinRM listening service enabled using wither HTTP or HTTPS and be accessible.
+    .PARAMETER ComputerName        
+        The name of the remote computer to update the DNS servers for.
+    .PARAMETER DNSServer1
+        The IP address of the primary DNS server to set.
+    .PARAMETER DNSServer2
+        The IP address of the secondary DNS server to set.
+    .EXAMPLE    
+        Update-ComputerDNSServers -ComputerName "Server01" -DNSServer1 "
+    .EXAMPLE
+        Update-ComputerDNSServers -ComputerName "Server02" -DNSServer1 -DNSServer2 "
+    #>
+}
+
+function Debug-String() {
+    <#
+    .SYNOPSIS
+    Outputs a string in diagnostic form or as source code.
+
+    .DESCRIPTION
+    With -AsSourceCode: prints a string in single-line form as a double-quoted
+    PowerShell string literal that is reusable as source code.
+
+    Otherwise: Prints a string with typically control or hidden characters visualized:
+
+    Common control characters are visualized using PowerShell's own escaping
+    notation by default, such as
+    "`t" for a tab, "`r" for a CR, but a LF is visualized as itself, as an
+    actual newline, unless you specify -SingleLine.
+
+    As an alternative, if you want ASCII-range control characters visualized in caret notation
+    (see https://en.wikipedia.org/wiki/Caret_notation), similar to cat -A on Linux,
+    use -CaretNotation. E.g., ^M then represents a CR; but note that a LF is
+    always represented as "$" followed by an actual newline.
+
+    Any other control characters as well as otherwise hidden characters or
+    format / punctuation characters in the non-ASCII range are represented in
+    `u{hex-code-point} notation.
+
+    To print space characters as themselves, use -NoSpacesAsDots.
+
+    $null inputs are accepted, but a warning is issued.
+
+    .PARAMETER CaretNotation
+    Causes LF to be visualized as "$" and all other ASCII-range control characters
+    in caret notation, similar to `cat -A` on Linux.
+
+    .PARAMETER Delimiters
+    You may optionally specify delimiters that The visualization of each input string is enclosed in "[...]" to demarcate
+    its boundaries. Use -Delimiters '' to suppress that, or specify alternate
+    delimiters; you may specify a single string or a 2-element array.
+
+    .PARAMETER NoSpacesAsDots
+    By default, space chars. are visualized as "·", the MIDDLE DOT char. (U+00B7)
+    Use this switch to represent spaces as themselves.
+
+    .PARAMETER AsSourceCode
+    Outputs each input string as a double-quoted PowerShell string
+    that is reusable in source code, with embedded double quotes, backticks, 
+    and "$" signs backtick-escaped.
+
+    Use -SingleLine to get a single-line representation.
+    Control characters that have no native PS escape sequence are represented
+    using `u{<hex-code-point} notation, which will only work in PowerShell *Core*
+    (v6+) source code.
+
+    .PARAMETER SingleLine
+    Requests a single-line representation, where LF characters are represented
+    as `n instead of actual line breaks.
+
+    .PARAMETER UnicodeEscapes
+    Requests that all non-ASCII-range characters - such as foreign letters -  in
+    the input string be represented as Unicode escape sequences in the form
+    `u{hex-code-point}.
+
+    When combined with -AsSourceCode, the result is a PowerShell string literal
+    composed of ASCII-range characters only, but note that only PowerShell *Core*
+    (v6+) understands such Unicode escapes.
+
+    By default, only control characters that don't have a native PS escape
+    sequence / cannot be represented with caret notation are represented this way.
+
+    .EXAMPLE
+    PS> "a`ab`t c`0d`r`n" | Debug-String -Delimiters [, ]
+    [a`0b`t·c`0d`r`
+    ]
+
+    .EXAMPLE
+    PS> "a`ab`t c`0d`r`n" | Debug-String -CaretNotation
+    a^Gb^I c^@d^M$
+
+    .EXAMPLE
+    PS> "a-ü`u{2028}" | Debug-String -UnicodeEscapes # The dash is an em-dash (U+2014)
+    a·`u{2014}·`u{fc}
+
+    .EXAMPLE
+    PS> "a`ab`t c`0d`r`n" | Debug-String -AsSourceCode -SingleLine # roundtrip
+    "a`ab`t c`0d`r`n"
+    #>
+
+    [CmdletBinding(DefaultParameterSetName = 'Standard')]
+    param(
+      [Parameter(ValueFromPipeline, Mandatory, ParameterSetName = 'Standard', Position = 0)]
+      [Parameter(ValueFromPipeline, Mandatory, ParameterSetName = 'Caret', Position = 0)]
+      [Parameter(ValueFromPipeline, Mandatory, ParameterSetName = 'AsSourceCode', Position = 0)]
+      [AllowNull()]
+      [object[]] $InputObject,
+
+      [Parameter(ParameterSetName = 'Caret')]
+      [switch] $CaretNotation,
+
+      [Parameter(ParameterSetName = 'Standard')]
+      [Parameter(ParameterSetName = 'Caret')]
+      [string[]] $Delimiters,
+
+      [Parameter(ParameterSetName = 'Standard')]
+      [switch] $NoSpacesAsDots,
+
+      [Parameter(ParameterSetName = 'AsSourceCode')]
+      [switch] $AsSourceCode,
+
+      [Parameter(ParameterSetName = 'Standard')]
+      [Parameter(ParameterSetName = 'AsSourceCode')]
+      [switch] $SingleLine,
+
+      [Parameter(ParameterSetName = 'Standard')]
+      [Parameter(ParameterSetName = 'Caret')]
+      [Parameter(ParameterSetName = 'AsSourceCode')]
+      [switch] $UnicodeEscapes
+
+    )
+
+    begin {
+      if ($UnicodeEscapes) {
+        $re = [regex] '(?s).' # *all* characters.
+      } else {
+        # Only control / separator / punctuation chars.
+        # * \p{C} matches any Unicode control / format/ invisible characters, both inside and outside
+        #   the ASCII range; note that tabs (`t) are control character too, but not spaces; it comprises
+        #   the following Unicode categories: Control, Format, Private_Use, Surrogate, Unassigned
+        # * \p{P} comprises punctuation characters.
+        # * \p{Z} comprises separator chars., including spaces, but not other ASCII whitespace, which is in the Control category.
+        # Note: For -AsSourceCode we include ` (backticks) too.
+        $re = if ($AsSourceCode) { [regex] '[`\p{C}\p{P}\p{Z}]' } else { [regex] '[\p{C}\p{P}\p{Z}]' }
+      }
+      $openingDelim = $closingDelim = ''
+      if ($Delimiters) {
+        $openingDelim = $Delimiters[0]
+        $closingDelim = $Delimiters[1]
+        if (-not $closingDelim) { $closingDelim = $openingDelim }
+      }
+    }
+
+    process {
+      if ($null -eq $InputObject) { Write-Warning 'Ignoring $null input.'; return }
+        foreach ($str in $InputObject) {
+            if ($null -eq $str) { Write-Warning 'Ignoring $null input.'; continue }
+            if ($str -isnot [string]) { $str = -join ($str | Out-String -Stream) }
+            $strViz = $re.Replace($str, {
+                param($match)
+                $char = [char] $match.Value[0]
+                $codePoint = [uint16] $char
+                $sbToUnicodeEscape = { '`u{' + '{0:x}' -f [int] $Args[0] + '}' }
+                # wv -v ('in [{0}]' -f [char] $match.Value)
+                if ($CaretNotation) {
+                    if ($codePoint -eq 10) {
+                        # LF -> $<newline>
+                        '$' + $char
+                    } elseif ($codePoint -eq 32) {
+                        # space char.
+                        if ($NoSpacesAsDots) { ' ' } else { '·' }
+                    } elseif ($codePoint -ge 0 -and $codePoint -le 31 -or $codePoint -eq 127) {
+                        # If it's a control character in the ASCII range,
+                        # use caret notation too (C0 range).
+                        # See https://en.wikipedia.org/wiki/Caret_notation
+                        '^' + [char] (64 + $codePoint)
+                    }
+                    elseif ($codePoint -ge 128) {
+                    # Non-ASCII (control) character -> `u{<hex-code-point>}
+                        & $sbToUnicodeEscape $codePoint
+                    } else {
+                        $char
+                    }
+                } else {
+                    # -not $CaretNotation
+                    # Translate control chars. that have native PS escape sequences
+                    # into these escape sequences.
+                    switch ($codePoint) {
+                        0  { '`0'; break }
+                        7  { '`a'; break }
+                        8  { '`b'; break }
+                        9  { '`t'; break }
+                        11 { '`v'; break }
+                        12 { '`f'; break }
+                        10 { if ($SingleLine) { '`n' } else { "`n" }; break }
+                        13 { '`r'; break }
+                        27 { '`e'; break }
+                        32 { if ($AsSourceCode -or $NoSpacesAsDots) { ' ' } else { '·' }; break } # Spaces are visualized as middle dots by default.
+                        default {
+                            if ($codePoint -ge 128) {
+                                & $sbToUnicodeEscape $codePoint
+                            } elseif ($AsSourceCode -and $codePoint -eq 96) { # ` (backtick)
+                                '``'
+                            } else {
+                                $char
+                            }
+                        }
+                    } # switch
+                }
+                }) # .Replace
+
+                # Output
+            if ($AsSourceCode) {
+                '"{0}"' -f ($strViz -replace '"', '`"' -replace '\$', '`$')
+            }
+            else {
+                if ($CaretNotation) {
+                    # If a string *ended* in a newline, our visualization now has
+                    # a trailing LF, which we remove.
+                    $strViz = $strViz -replace '(?s)^(.*\$)\n$', '$1'
+                }
+                $openingDelim + $strViz + $closingDelim
+            }
+        }
+    } # process
+}
+
+function Get-FolderStats() {
+    Param(
+        [Parameter(Mandatory)]
+        [string]$Path,
+        [switch]$Recurse,
+        [switch]$IncludeTypeStats,
+        [switch]$ShowProgress,
+        [ValidateSet("Standard","Text")]
+        [string]$ProgressType = "Standard"
+    )
+
+    $params = @{}
+    if ($Recurse.IsPresent) {
+        $params.Add("Recurse", $true)
+    } else {
+        $params.Add("Recurse", $false)
+    }
+    Write-Host "Gathering files... This may take a while if you selected recuse on a large folder!"
+    $Items = Get-ChildItem -Path $Path @params -File
+    $Stats = $Items | Measure-Object -Property Length -Sum | Select-Object Count, @{Name="Size"; Expression={$_.Sum / 1mb}}
+    $Stats | Add-Member -MemberType NoteProperty -Name "Folder" -Value $Path
+
+    $threeYrStats = $Items.Where({$_.LastWriteTime -lt (Get-Date).AddYears(-3)}) | Measure-Object -Property Length -Sum | Select-Object Count, @{Name="Size";Expression={$_.Sum / 1mb}}
+    $fourYrStats = $Items.Where({$_.LastWriteTime -lt (Get-Date).AddYears(-4)}) | Measure-Object -Property Length -Sum | Select-Object Count, @{Name="Size";Expression={$_.Sum / 1mb}}
+    $fiveYrStats = $Items.Where({$_.LastWriteTime -lt (Get-Date).AddYears(-5)}) | Measure-Object -Property Length -Sum | Select-Object Count, @{Name="Size";Expression={$_.Sum / 1mb}}
+
+    [PSCustomObject]@{
+        ThreeYearFiles = $threeYrStats.count
+        ThreeYearSize = $threeYrStats.Size
+        FourYearFiles = $fourYrStats.Count
+        FourYearSize = $fourYrStats.Size
+        FiveYearFiles = $fiveYrStats.Count
+        FiveYearSize = $fiveYrStats.Size
+    }
+
+    # Stats per file type
+
+    if ($IncludeTypeStats.IsPresent) {
+        Write-Host "Gathering Type statistics... This may take a while if you selected recuse on a large folder!"
+        $TypeStats = [List[PsObject]]::New()
+
+        $Types = $Items | Group-Object -Property Extension | Where-Object {$_.Name -ne ''}
+
+        foreach ($Type in $Types) {
+
+            If ($ShowProgress) {
+                $INdex = $Types.IndexOf($Type)
+                $PercentComplete = [math]::Round(($Index / $Types.Count) * 100)
+                if ($ProgressType -eq "Standard") {
+                    Write-Progress -PercentComplete $PercentComplete -Activity "Gathering Type statistics" -Status "Processing $Type"
+                } else {
+                    Show-ProgressBar -Activity "Gathering Type statistics" -Status "Processing $Type" -PercentComplete $PercentComplete
+                }
+            }
+
+            $TypeSize = ($Type.Group | Measure-Object -Property Length -Sum).Sum / 1mb
+
+            if ($TypeSize -ge 0.01) {
+                $TypeStat = [PSCustomObject]@{
+                    Name = ( ('' -eq $Type.Name) ? "Undefined" : $Type.Name )
+                    Count = $Type.Count
+                    Size = $TypeSize
+                }
+                $TypeStats.Add($TypeStat)
+            }
+        }
+        if ($ProgressType -eq "Standard") {
+            Write-Progress -Completed
+        } else {
+            Show-ProgressBar -Completed
+        }
+
+        if ($TypeStats.Count -gt 0) {
+            $Stats | Add-Member -MemberType NoteProperty -Name "TypeStats" -Value ($TypeStats.toArray())
+        }
+    }
+    return $Stats
+    <#
+    .SYNOPSIS
+        Get statistics for a folder.
+    .DESCRIPTION
+        Get statistics for a folder, including the number of files, total size, and optionally statistics per file type.
+    .PARAMETER Path
+        The path to the folder for which to get statistics.
+    .PARAMETER Recurse
+        If present, statistics are gathered recursively, including all subfolders.
+    .PARAMETER IncludeTypeStats
+        If present, statistics are gathered per file type.  
+    .PARAMETER ShowProgress
+        If present, a progress bar is displayed while gathering statistics.
+    .PARAMETER ProgressType 
+        The type of progress bar to display. Options are "Standard" or "Text".
+    .EXAMPLE
+        Get-FolderStats -Path "C:\Temp" -Recurse -IncludeTypeStats
+        Get statistics for the folder "C:\Temp", including subfolders, and per file type.  
+    .EXAMPLE
+        Get-FolderStats -Path "C:\Temp" -ShowProgress
+        Get statistics for the folder "C:\Temp" and display a progress bar while gathering statistics.  
+    #>
+}
+
+function Get-FunctionNamesInFiles () {
+    [CmdletBinding()]
+    Param (
+        [Parameter(Mandatory)]
+        [string]$Path,
+        [string[]]$Exclude,
+        [string]$Filter,
+        [switch]$Recurse
+
+    )
+
+    try {
+        $params = @{
+            Path = $Path
+        }
+        if ($Exclude) {
+            $params.Add("Exclude", $Exclude)
+        }
+        if ($Filter) {
+            $params.add("Filter", $Filter)
+        }
+        if ($Recurse) {
+            $params.Add("Recurse", $true)
+        }
+
+        Get-ChildItem @params | ForEach-Object {
+            $Command = Get-Command $_
+            $Command.ScriptBlock.Ast.FindAll({$args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst]}, $false).Name
+        } | ForEach-Object {
+            "'$_',"
+        }
+    } catch {
+        throw $_
+    }
+    <#
+    .SYNOPSIS
+        Get the names of functions defined in files.
+    .DESCRIPTION
+        Get the names of functions defined in files in a specified folder.
+    .PARAMETER Path
+        The path to the folder containing the files to search.
+    .PARAMETER Exclude
+        An array of file names or patterns to exclude from the search.
+    .PARAMETER Filter
+        A wildcard pattern to filter the files to search.
+    .PARAMETER Recurse
+        If present, the search is performed recursively, including all subfolders.
+    .EXAMPLE
+        Get-FunctionNamesInFiles -Path "C:\Scripts"
+        Get the names of functions defined in files in the "C:\Scripts" folder.
+    .EXAMPLE    
+        Get-FunctionNamesInFiles -Path "C:\Scripts" -Recurse
+        Get the names of functions defined in files in the "C:\Scripts" folder and all subfolders.  
+    .EXAMPLE
+        Get-FunctionNamesInFiles -Path "C:\Scripts" -Exclude "*.ps1"
+        Get the names of functions defined in files in the "C:\Scripts" folder, excluding all .ps1 files.
+    .EXAMPLE
+        Get-FunctionNamesInFiles -Path "C:\Scripts" -Filter "*.psm1"
+        Get the names of functions defined in files in the "C:\Scripts" folder, including only .psm1 files.
+    .EXAMPLE
+        Get-FunctionNamesInFiles -Path "C:\Scripts" -Recurse -Exclude "*.ps1" -Filter "*.psm1"
+        Get the names of functions defined in files in the "C:\Scripts" folder and all subfolders, excluding .ps1 files and including only .psm1 files.
+    #>
+}
+
+Param( 
+    [Parameter(
+        Mandatory = $true
+    )]
+    [String] $ProcessName,
+    [Parameter(
+        Mandatory = $true,
+        ParameterSetName = "CPU"
+    )]
+    [Switch] $CPU,
+    [Parameter(
+        Mandatory = $true,
+        ParameterSetName="Memory"
+    )]
+    [Switch] $Memory
+)
+
+function Get-ProcessStatus () {
+    [CmdletBinding()]
+    Param (
+        [Parameter(Mandatory)]
+        [string]$ProcessName,
+        [switch]$CPU,
+        [switch]$Memory
+    )
+
+    $NumberOfLogicalProcessors=(Get-WmiObject -class Win32_processor | Measure-Object -Sum NumberOfLogicalProcessors).Sum -1
+
+    if ($CPU) {
+        $Counter = "\Process({0})\% Processor Time" -f $ProcessName
+        $cookedValue = ((Get-Counter $Counter).Countersamples).cookedValue
+        $value = [math]::Round(($cookedValue) / $NumberOfLogicalProcessors , 1)
+        write-host "$Process CPU Utilization: $value"
+    }
+
+    If ($Memory) {
+        $Counter = "Process({0})\Working Set" -f $ProcessName
+        $cookedValue = ((Get-Process $Counter).Countersamples).cookedValue
+        $Value = [math]::Round(($CookedValue)/1023/1024 ,1)
+        Write-Host "Process memory utilization $value"
+    }
+    <#
+    .SYNOPSIS
+        Get the CPU and memory utilization of a process.
+    .DESCRIPTION
+        Get the CPU and memory utilization of a process by specifying the process name.
+    .PARAMETER ProcessName
+        The name of the process for which to get the CPU and memory utilization.
+    .PARAMETER CPU
+        If present, the CPU utilization of the process is returned.
+    .PARAMETER Memory
+        If present, the memory utilization of the process is returned.
+    .EXAMPLE    
+        Get-ProcessStatus -ProcessName "notepad" -CPU
+        Get the CPU utilization of the "notepad" process.
+    .EXAMPLE    
+        Get-ProcessStatus -ProcessName "notepad" -Memory
+        Get the memory utilization of the "notepad" process.
+    .EXAMPLE    
+        Get-ProcessStatus -ProcessName "notepad" -CPU -Memory
+        Get the CPU and memory utilization of the "notepad" process.
+    #>
+}
+
+function Update-DataBaseMailCredentials {
+    [CmdletBinding()]
+    Param (
+        [Parameter(Mandatory)]
+        [string]$SqlServer,
+        [Parameter(Mandatory)]
+        [Parameter(Mandatory=$false)]
+        [string]$MailAccount,
+        [Parameter(Mandatory)]
+        [string]$MailUser,
+        [Parameter(Mandatory)]
+        [string]$MailPassword,
+    )
+
+    # This SQL script retrieves the current SQL Database Mail configurations
+    $sqlGetDbMailAccounts = @"
+SELECT [sysmail_server]
+    ,[account_id]
+    ,[sysmail_account].[name] AS [AccountName]
+    ,[servertype]
+    ,[servername] AS [SMTPServerAddress]
+    ,[Port]
+    ,[Username]
+
+FROM [msdb].[dbo].[sysmail_server]
+INNER JOIN [msdb].[dbo].[sysmail_account]
+ON [sysmail_server].[account_id]=[sysmail_account].[account_id]
+"@
+
+If ($MailAccount) {
+    $sqlGetDbMailAccounts += " WHERE [sysmail_account].[name] = '$MailAccount'"
+}
+
+    # this SQL script updates the Database Mail account for the Account Id.
+    $sqlUpdateDbMailAccount = @"
+EXEC [dbo].[sysmail_update_account_sp] 
+    @account_id='{0}'
+    ,@username='{1}'
+    ,@password='{2}'
+"@
+
+    # Retrieve the Database Mail Accounts
+    $dbMailAccounts = Invoke-Sqlcmd -ServerInstance $sqlserver -Database msdb -Query $sqlGetDbMailAccounts
+
+    # Loop through each account and check if the username has changed.
+    # if the username has changed update the Database Mail configuration.
+    foreach ($dbMailAccount in $dbMailAccounts) {
+        If ($dbMailAccount.Username -ne $ses_creds.SmtpUsername) {
+            try{
+                $Procedure = $sqlUpdateDbMailAccount -f $dbMailAccount.account_Id, $MailUser, $MailPassword
+                $result = Invoke-Sqlcmd -ServerInstance $sqlserver -Database 'msdb' -Query $Procedure
+            } catch {
+                Write-Log $result
+                throw $result
+            }
+            $msg = "Database mail account {0} updated to new credentials." -f $dbMailAccount.AccountName
+            Write-Log $msg
+        }
+    }
+    <#
+    .SYNOPSIS
+        Update the credentials for SQL Database Mail.
+    .DESCRIPTION
+        Update the credentials for SQL Database Mail by specifying the SQL Server, Database, Mail Server, Mail User, and Mail Password.
+    .PARAMETER SqlServer
+        The SQL Server to update the Database Mail credentials.
+    .PARAMETER MailAccount      
+        The name of the Database Mail account to update. If not specified, all accounts are updated.
+    .PARAMETER MailUser
+        The new username for the Database Mail account.
+    .PARAMETER MailPassword
+        The new password for the Database Mail account.
+    .EXAMPLE
+        Update-DataBaseMailCredentials -SqlServer "SQLServer01" -MailAccount "MailAccount01" -MailUser "user01" -MailPassword "password01"
+        Update the credentials for the Database Mail account "MailAccount01" on SQL Server "SQLServer01" with the username "user01" and password "password01".
+    .EXAMPLE
+        Update-DataBaseMailCredentials -SqlServer "SQLServer01" -MailUser "user01" -MailPassword "password01"
+        Update the credentials for all Database Mail accounts on SQL Server "SQLServer01" with the username "user01" and password "password01". 
+    #>
+}
+
+function ConvertTo-LocalTime() {
+    param( 
+        [parameter(Mandatory=$true)]
+        [Datetime]$DateTime 
+    )
+    $tz = Get-TimeZone
+    $result = [System.TimeZoneInfo]::ConvertTimeBySystemTimeZoneId($DateTime, $tz.StandardName)
+    return $result
+    <#
+    .SYNOPSIS
+        Convert a UTC time to local time.
+    .DESCRIPTION
+        Convert a UTC time to local time.
+    .PARAMETER DateTime
+        The UTC time to convert to local time.
+    .EXAMPLE
+        ConvertTo-LocalTime -DateTime "2021-01-01 12:00:00"
+        Convert the UTC time "2021-01-01 12:00:00" to local time.   
+    .EXAMPLE
+        ConvertTo-LocalTime -DateTime (Get-Date)
+        Convert the current UTC time to local time.
+    #>
+}
+
+function ConvertFrom-LocalTime() {
+    [CmdletBinding(DefaultParameterSetName = 'Name')]
+    Param(
+        [Parameter(
+            Mandatory = $true
+        )]
+        [DateTime]$DateTime,
+        [Parameter(
+            Mandatory = $true,
+            ParameterSetName = "Name"
+        )]
+        [String]$StandardName,
+        [Parameter(
+            Mandatory =$true,
+            ParameterSetName = "tz"
+        )]
+        [TimeZoneInfo]$Tz
+    )
+    if ($StandardName) {
+        $Tz = Get-TimeZone -Name $StandardName
+    }
+
+    $result = [System.TimeZoneInfo]::ConvertTime($datetime, $Tz)
+    return $result
+    <#
+    .SYNOPSIS
+        Convert a local time to UTC time.
+    .DESCRIPTION
+        Convert a local time to UTC time.
+    .PARAMETER DateTime       
+        The local time to convert to UTC time.  
+    .PARAMETER StandardName
+        The standard name of the time zone to use for the conversion.
+    .PARAMETER Tz
+        The time zone to use for the conversion.
+    .EXAMPLE    
+        ConvertFrom-LocalTime -DateTime "2021-01-01 12:00:00" -StandardName "Eastern Standard Time"
+        Convert the local time "2021-01-01 12:00:00" to UTC time using the "Eastern Standard Time" time zone.   
+    .EXAMPLE
+        ConvertFrom-LocalTime -DateTime (Get-Date) -Tz (Get-TimeZone -Name "Eastern Standard Time")
+        Convert the current local time to UTC time using the "Eastern Standard Time" time zone.
+    #>
+}
+
+function ConvertFrom-UTC() {
+    Param(
+        [Parameter(
+            Mandatory = $true
+        )]
+        [datetime]$DateTime
+    )
+    $tz = Get-TimeZone
+    $result = [System.TimeZoneInfo]::ConvertTimeFromUtc($Datetime, $tz)
+    return $result
+    <#
+    .SYNOPSIS
+        Convert a UTC time to local time.
+    .DESCRIPTION    
+        Convert a UTC time to local time.
+    .PARAMETER DateTime      
+        The UTC time to convert to local time.
+    .EXAMPLE
+        ConvertFrom-UTC -DateTime "2021-01-01 12:00:00"
+        Convert the UTC time "2021-01-01 12:00:00" to local time.
+    .EXAMPLE    
+        ConvertFrom-UTC -DateTime (Get-Date)
+        Convert the current UTC time to local time.
+    #>
+}
+
+function ConvertTo-UTC() {
+    Param(
+        [Parameter(
+            Mandatory = $true
+        )]
+        [DateTime]$time
+    )
+    $tz = Get-TimeZone
+    $result = [System.TimeZoneInfo]::ConvertTimeToUtc($datetime, $tz)
+    return $result
+
+    <#
+    .SYNOPSIS
+        Convert a local time to UTC time.
+    .DESCRIPTION
+        Convert a local time to UTC time.
+    .PARAMETER DateTime
+        The local time to convert to UTC time.
+    .EXAMPLE
+        ConvertTo-UTC -DateTime "2021-01-01 12:00:00"
+        Convert the local time "2021-01-01 12:00:00" to UTC time.
+    .EXAMPLE
+        ConvertTo-UTC -DateTime (Get-Date)
+        Convert the current local time to UTC time.
     #>
 }
