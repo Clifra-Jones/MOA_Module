@@ -3,6 +3,7 @@ Param(
     [switch]$ShowFinalProgress,
     [char]$BarCharacter = '='
 )
+
 $TotalItems = 300
 $BarChar = @{}
 if ($BarCharacter) {
@@ -10,6 +11,7 @@ if ($BarCharacter) {
 } else {
     $BarChar['BarChar'] = '='
 }
+Start-Transcript -Path "ProgressBarExample.log"
 for ($i = 1; $i -le $totalItems; $i++) {
     $percentComplete = [Math]::Floor(($i / [double]$totalItems) * 100)
     Show-ProgressBar -PercentComplete $percentComplete -Activity "SQL Import" -Status "Item $i of $totalItems" @BarChar
@@ -22,3 +24,4 @@ If ($ShowFinalProgress) {
 } else {
     Show-ProgressBar -Completed
 }
+Stop-Transcript

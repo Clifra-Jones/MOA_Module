@@ -371,7 +371,7 @@ function Show-ProgressBar {
     if ($onlyCompletedProvided) {
         # Create a blank line that overwrites the existing progress bar
         $clearLine = "`r" + " " * 200 + "`r"  # 200 spaces should be enough to clear most lines
-        Write-ConsoleOnly $clearLine -NoNewline
+        Write-ConsoleOnly $clearLine -NoNewline       
         return
     }
     
@@ -438,6 +438,8 @@ function Show-ProgressBar {
     # If -Completed is specified with custom parameters, add a newline to finalize and keep it visible
     if ($Completed -and (-not $onlyCompletedProvided) -and (-not $onlyCompletedAndSpinnerProvided)) {
         Write-ConsoleOnly ""
+    } else {
+
     }
     <#
     .SYNOPSIS
